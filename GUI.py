@@ -227,7 +227,7 @@ class BlackjackApp(tk.Tk):
         self.speed_val_lbl.pack(side=tk.RIGHT, padx=(4,0))
 
         self.speed_slider = ttk.Scale(
-            speed_frame, from_=50, to=1000, orient="horizontal",
+            speed_frame, from_=50, to=4000, orient="horizontal",
             command=self._on_speed_change, length=220
         )
         self.speed_slider.set(self.deal_delay_var.get())
@@ -1076,3 +1076,4 @@ class BlackjackApp(tk.Tk):
     def _toast(self, text: str) -> None:
         self.msg_var.set(text)
         self.after(3500, lambda: self.msg_var.set(""))
+
