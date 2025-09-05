@@ -1,12 +1,10 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Blackjack GUI (Tkinter) — Stable Build
-- Baseline features: speed slider (exact timing), HUD, outcome banner, discard pile,
-  decks control, P/L chart, Hi-Lo running/true count, hotkeys, round persists until next Deal.
-- Optional Basic Strategy hint (checkbox). No training/test modes.
-- Running Decision Stats (total/correct and per-action counts) with Reset button.
-Rules assumed: Dealer stands on soft 17 (S17); Double After Split allowed; No surrender.
+Blackjack GUI (Tkinter) — Fullscreen-Ready Build
+- Adds fullscreen toggle (F11), exit (Esc), and resizable window.
+- Canvas resizes with window; table redraws responsively and stays centered.
+- Original game logic and features preserved.
 """
 
 from __future__ import annotations
@@ -134,10 +132,18 @@ class PlayerHand:
 class BlackjackApp(tk.Tk):
     def __init__(self) -> None:
         super().__init__()
-        self.title("Blackjack — Stable")
+        self.title("Blackjack — Fullscreen Ready")
         self.configure(bg=BACKGROUND_COLOR)
-        self.geometry("1260x780")
-        self.resizable(False, False)
+
+        # Window is resizable; start with a comfortable size
+        self.geometry("1280x800")
+        self.minsize(1024, 700)
+        self.resizable(True, True)
+
+        # Fullscreen state
+        self._is_fullscreen = False
+        self.bind("<F11>", lambda e: self.toggle_fullscreen())
+        self.bind("<Escape>", lambda e: self.exit_fullscreen())
 
         self.shoe = Shoe(decks=DEFAULT_DECKS)
         self.bankroll = START_BANKROLL
@@ -154,6 +160,9 @@ class BlackjackApp(tk.Tk):
         self.dealer_blackjack: bool = False
         self.discard_count: int = 0  # number of cards in discard pile
         self.round_complete: bool = False
+
+        # Track last "hide dealer hole" state to redraw on window resizes
+        self._last_hide_dealer_hole: bool = False
 
         # Speed control (ms)
         self.deal_delay_var = tk.IntVar(value=300)
@@ -188,7 +197,18 @@ class BlackjackApp(tk.Tk):
         self.stats_split_var = tk.StringVar(value="Split: 0/0")
 
         self._build_ui()
-        self._update_status("Welcome! Set your bet and click Deal.")
+        self._update_status("Welcome! Set your bet and click Deal.  Press F11 to toggle fullscreen.")
+
+    # ----------------------- Fullscreen Helpers ------------------------------
+
+    def toggle_fullscreen(self) -> None:
+        self._is_fullscreen = not self._is_fullscreen
+        self.attributes('-fullscreen', self._is_fullscreen)
+
+    def exit_fullscreen(self) -> None:
+        if self._is_fullscreen:
+            self._is_fullscreen = False
+            self.attributes('-fullscreen', False)
 
     # ----------------------- Utilities --------------------------------------
 
@@ -295,6 +315,10 @@ class BlackjackApp(tk.Tk):
         self.set_decks_btn = ttk.Button(top, text="Set Decks", command=self.on_set_decks)
         self.set_decks_btn.pack(side=tk.LEFT, padx=6)
 
+        # Fullscreen toggle button (optional convenience)
+        self.full_btn = ttk.Button(top, text="Fullscreen (F11)", command=self.toggle_fullscreen)
+        self.full_btn.pack(side=tk.RIGHT, padx=(6,0))
+
         # Speed slider block
         speed_frame = tk.Frame(top, bg=BACKGROUND_COLOR)
         speed_frame.pack(side=tk.RIGHT)
@@ -306,7 +330,7 @@ class BlackjackApp(tk.Tk):
         self.speed_val_lbl.pack(side=tk.RIGHT, padx=(4,0))
 
         self.speed_slider = ttk.Scale(
-            speed_frame, from_=50, to=1000, orient="horizontal",
+            speed_frame, from_=50, to=3000, orient="horizontal",
             command=self._on_speed_change, length=220
         )
         self.speed_slider.set(self.deal_delay_var.get())
@@ -335,9 +359,11 @@ class BlackjackApp(tk.Tk):
         middle = tk.Frame(self, bg=BACKGROUND_COLOR)
         middle.pack(fill=tk.BOTH, expand=True, padx=10, pady=(2,8))
 
-        # Left: main table canvas
-        self.canvas = tk.Canvas(middle, width=960, height=540, bg=BACKGROUND_COLOR, highlightthickness=0)
-        self.canvas.pack(side=tk.LEFT, padx=(0,8))
+        # Left: main table canvas (make it expand with window)
+        self.canvas = tk.Canvas(middle, bg=BACKGROUND_COLOR, highlightthickness=0)
+        self.canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0,8))
+        # Redraw when canvas size changes
+        self.canvas.bind("<Configure>", lambda e: self._draw_table(getattr(self, "_last_hide_dealer_hole", False)))
 
         # Right: info panel
         side = tk.Frame(middle, bg=BACKGROUND_COLOR)
@@ -406,25 +432,41 @@ class BlackjackApp(tk.Tk):
     # ----------------------- Rendering --------------------------------------
 
     def _draw_table(self, hide_dealer_hole: bool) -> None:
+        # Remember this state so window resizes keep the right reveal
+        self._last_hide_dealer_hole = hide_dealer_hole
+
         self.canvas.delete("all")
+        cw = max(300, self.canvas.winfo_width())
+        ch = max(300, self.canvas.winfo_height())
+
+        # Vertical layout anchors
+        top_margin = int(ch * 0.03)
+        dealer_y = top_margin + 20
+        dealer_val_y = dealer_y + CARD_H + 14
+
+        player_section_top = int(ch * 0.55)
+        label_y = player_section_top - 60
 
         # Dealer area
-        self._draw_label(480, 20, "Dealer", anchor="n", size=14)
-        self._draw_hand(self.dealer, x=210, y=40, hide_hole=hide_dealer_hole)
+        self._draw_label(cw // 2, top_margin, "Dealer", anchor="n", size=14)
+        # Dealer hand centered
+        self._draw_hand_centered(self.dealer, y=dealer_y, hide_hole=hide_dealer_hole, slot_index=0, slots=1, canvas_width=cw)
 
         if not hide_dealer_hole:
-            self._draw_label(480, 210, f"Value: {self.dealer.value()}", anchor="n", size=12)
+            self._draw_label(cw // 2, dealer_val_y, f"Value: {self.dealer.value()}", anchor="n", size=12)
 
         # Player hands
-        base_y = 320
         if len(self.player_hands) == 1:
-            self._draw_label(480, 260, "Player", anchor="n", size=14)
-            self._draw_player_hand(self.player_hands[0], x=210, y=base_y, is_active=(self.active_hand_index == 0))
+            self._draw_label(cw // 2, label_y, "Player", anchor="n", size=14)
+            self._draw_player_hand_centered(self.player_hands[0], y=player_section_top, is_active=(self.active_hand_index == 0), slot_index=0, slots=1, canvas_width=cw)
         elif len(self.player_hands) == 2:
-            self._draw_label(300, 260, "Hand 1", anchor="n", size=14)
-            self._draw_player_hand(self.player_hands[0], x=60, y=base_y, is_active=(self.active_hand_index == 0))
-            self._draw_label(780, 260, "Hand 2", anchor="n", size=14)
-            self._draw_player_hand(self.player_hands[1], x=520, y=base_y, is_active=(self.active_hand_index == 1))
+            # Two slots side-by-side
+            left_center = (cw // 4)
+            right_center = (cw * 3) // 4
+            self._draw_label(left_center, label_y, "Hand 1", anchor="n", size=14)
+            self._draw_label(right_center, label_y, "Hand 2", anchor="n", size=14)
+            self._draw_player_hand_centered(self.player_hands[0], y=player_section_top, is_active=(self.active_hand_index == 0), slot_index=0, slots=2, canvas_width=cw)
+            self._draw_player_hand_centered(self.player_hands[1], y=player_section_top, is_active=(self.active_hand_index == 1), slot_index=1, slots=2, canvas_width=cw)
 
         # Update HUD
         if self.player_hands:
@@ -438,12 +480,31 @@ class BlackjackApp(tk.Tk):
     def _draw_label(self, x: int, y: int, text: str, anchor="center", size=12) -> None:
         self.canvas.create_text(x, y, text=text, fill=TABLE_TEXT, font=("Arial", size, "bold"), anchor=anchor)
 
-    def _draw_player_hand(self, ph: PlayerHand, x: int, y: int, is_active: bool) -> None:
-        self._draw_hand(ph.hand, x=x, y=y, hide_hole=False)
+    # Centered drawing helpers (compute a start x per slot)
+    def _slot_center_x(self, slot_index: int, slots: int, canvas_width: int) -> int:
+        region_w = canvas_width // max(1, slots)
+        return region_w * slot_index + region_w // 2
+
+    def _hand_start_x(self, hand: Hand, slot_index: int, slots: int, canvas_width: int) -> int:
+        hand_w = CARD_W + max(0, len(hand.cards) - 1) * CARD_SPACING
+        cx = self._slot_center_x(slot_index, slots, canvas_width)
+        start_x = int(cx - hand_w / 2)
+        return max(10, start_x)
+
+    def _draw_player_hand_centered(self, ph: PlayerHand, y: int, is_active: bool, slot_index: int, slots: int, canvas_width: int) -> None:
+        start_x = self._hand_start_x(ph.hand, slot_index, slots, canvas_width)
+        self._draw_hand(ph.hand, x=start_x, y=y, hide_hole=False)
         status = f"Value: {ph.hand.value()}{' (soft)' if ph.hand.is_soft() else ''}    Bet: {ph.bet}{' (Doubled)' if ph.doubled else ''}"
-        self._draw_label(x + 360, y + CARD_H + 6, status, anchor="nw", size=12)
+        self._draw_label(start_x + CARD_W * 3 + CARD_SPACING * 3, y + CARD_H + 6, status, anchor="nw", size=12)
         if is_active:
-            self.canvas.create_rectangle(x-10, y-10, x+CARD_W*6, y+CARD_H+10, outline="#ffd166", width=3)
+            pad = 10
+            # outline around expected max width of 6 cards
+            max_w = CARD_W + CARD_SPACING * 5
+            self.canvas.create_rectangle(start_x - pad, y - pad, start_x + max_w + pad, y + CARD_H + pad, outline="#ffd166", width=3)
+
+    def _draw_hand_centered(self, hand: Hand, y: int, hide_hole: bool, slot_index: int, slots: int, canvas_width: int) -> None:
+        start_x = self._hand_start_x(hand, slot_index, slots, canvas_width)
+        self._draw_hand(hand, x=start_x, y=y, hide_hole=hide_hole)
 
     def _draw_hand(self, hand: Hand, x: int, y: int, hide_hole: bool) -> None:
         for i, c in enumerate(hand.cards):
