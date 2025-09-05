@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Blackjack GUI (Tkinter) — Fullscreen-Ready Build
-- Adds fullscreen toggle (F11), exit (Esc), and resizable window.
-- Canvas resizes with window; table redraws responsively and stays centered.
-- Original game logic and features preserved.
+Blackjack GUI (Tkinter) — Fullscreen + In-GUI Insurance (v2)
+- Fullscreen toggle (F11), exit (Esc), resizable canvas with responsive redraws.
+- Insurance prompt shown inline in the UI (no popup), with Yes/No buttons and Y/N hotkeys.
+- Hotkeys remain active after interacting with insurance.
 """
 
 from __future__ import annotations
@@ -132,7 +132,7 @@ class PlayerHand:
 class BlackjackApp(tk.Tk):
     def __init__(self) -> None:
         super().__init__()
-        self.title("Blackjack — Fullscreen Ready")
+        self.title("Blackjack — Fullscreen + In-GUI Insurance (v2)")
         self.configure(bg=BACKGROUND_COLOR)
 
         # Window is resizable; start with a comfortable size
@@ -163,6 +163,11 @@ class BlackjackApp(tk.Tk):
 
         # Track last "hide dealer hole" state to redraw on window resizes
         self._last_hide_dealer_hole: bool = False
+
+        # Insurance prompt state
+        self.insurance_prompt_visible: bool = False
+        self.insurance_max_allowed: int = 0
+        self._insurance_frame: tk.Frame | None = None
 
         # Speed control (ms)
         self.deal_delay_var = tk.IntVar(value=300)
@@ -213,6 +218,9 @@ class BlackjackApp(tk.Tk):
     # ----------------------- Utilities --------------------------------------
 
     def _enable_actions(self, hit=True, stand=True, double=False, split=False) -> None:
+        # When insurance prompt is up, only allow responding to insurance.
+        if self.insurance_prompt_visible:
+            hit = stand = double = split = False
         self.hit_btn.config(state=("normal" if hit else "disabled"))
         self.stand_btn.config(state=("normal" if stand else "disabled"))
         self.double_btn.config(state=("normal" if double else "disabled"))
@@ -222,6 +230,7 @@ class BlackjackApp(tk.Tk):
         self._enable_actions(False, False, False, False)
 
     def _bind_hotkeys(self) -> None:
+        # Gameplay
         self.bind_all('<h>', lambda e: self.on_hit())
         self.bind_all('<H>', lambda e: self.on_hit())
         self.bind_all('<s>', lambda e: self.on_stand())
@@ -234,6 +243,12 @@ class BlackjackApp(tk.Tk):
         self.bind_all('<Return>', lambda e: self.on_deal())
         self.bind_all('<r>', lambda e: self.on_shuffle())
         self.bind_all('<R>', lambda e: self.on_shuffle())
+
+        # Insurance hotkeys
+        self.bind_all('<y>', lambda e: self._on_insurance_yes())
+        self.bind_all('<Y>', lambda e: self._on_insurance_yes())
+        self.bind_all('<n>', lambda e: self._on_insurance_no())
+        self.bind_all('<N>', lambda e: self._on_insurance_no())
 
     def _delay(self) -> int:
         return max(0, int(self.deal_delay_var.get()))
@@ -315,7 +330,7 @@ class BlackjackApp(tk.Tk):
         self.set_decks_btn = ttk.Button(top, text="Set Decks", command=self.on_set_decks)
         self.set_decks_btn.pack(side=tk.LEFT, padx=6)
 
-        # Fullscreen toggle button (optional convenience)
+        # Fullscreen toggle button
         self.full_btn = ttk.Button(top, text="Fullscreen (F11)", command=self.toggle_fullscreen)
         self.full_btn.pack(side=tk.RIGHT, padx=(6,0))
 
@@ -330,27 +345,27 @@ class BlackjackApp(tk.Tk):
         self.speed_val_lbl.pack(side=tk.RIGHT, padx=(4,0))
 
         self.speed_slider = ttk.Scale(
-            speed_frame, from_=50, to=3000, orient="horizontal",
+            speed_frame, from_=50, to=1000, orient="horizontal",
             command=self._on_speed_change, length=220
         )
         self.speed_slider.set(self.deal_delay_var.get())
         self.speed_slider.pack(side=tk.RIGHT)
 
-        # Bottom bar: messages
-        actions = tk.Frame(self, bg=BACKGROUND_COLOR)
-        actions.pack(side=tk.BOTTOM, fill=tk.X, padx=10, pady=8)
+        # Bottom bar: messages + action buttons
+        self.actions = tk.Frame(self, bg=BACKGROUND_COLOR)
+        self.actions.pack(side=tk.BOTTOM, fill=tk.X, padx=10, pady=8)
 
         self.msg_var = tk.StringVar(value="")
-        self.msg_lbl = tk.Label(actions, textvariable=self.msg_var, fg=TABLE_TEXT, bg=BACKGROUND_COLOR, font=("Arial", 12))
+        self.msg_lbl = tk.Label(self.actions, textvariable=self.msg_var, fg=TABLE_TEXT, bg=BACKGROUND_COLOR, font=("Arial", 12))
         self.msg_lbl.pack(side=tk.LEFT)
 
-        btn_box = tk.Frame(actions, bg=BACKGROUND_COLOR)
-        btn_box.pack(side=tk.RIGHT)
+        self.btn_box = tk.Frame(self.actions, bg=BACKGROUND_COLOR)
+        self.btn_box.pack(side=tk.RIGHT)
 
-        self.hit_btn = ttk.Button(btn_box, text="Hit", command=self.on_hit)
-        self.stand_btn = ttk.Button(btn_box, text="Stand", command=self.on_stand)
-        self.double_btn = ttk.Button(btn_box, text="Double", command=self.on_double)
-        self.split_btn = ttk.Button(btn_box, text="Split", command=self.on_split)
+        self.hit_btn = ttk.Button(self.btn_box, text="Hit", command=self.on_hit)
+        self.stand_btn = ttk.Button(self.btn_box, text="Stand", command=self.on_stand)
+        self.double_btn = ttk.Button(self.btn_box, text="Double", command=self.on_double)
+        self.split_btn = ttk.Button(self.btn_box, text="Split", command=self.on_split)
 
         for b in (self.hit_btn, self.stand_btn, self.double_btn, self.split_btn):
             b.pack(side=tk.LEFT, padx=4)
@@ -359,10 +374,9 @@ class BlackjackApp(tk.Tk):
         middle = tk.Frame(self, bg=BACKGROUND_COLOR)
         middle.pack(fill=tk.BOTH, expand=True, padx=10, pady=(2,8))
 
-        # Left: main table canvas (make it expand with window)
+        # Left: main table canvas (expand with window)
         self.canvas = tk.Canvas(middle, bg=BACKGROUND_COLOR, highlightthickness=0)
         self.canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0,8))
-        # Redraw when canvas size changes
         self.canvas.bind("<Configure>", lambda e: self._draw_table(getattr(self, "_last_hide_dealer_hole", False)))
 
         # Right: info panel
@@ -429,10 +443,89 @@ class BlackjackApp(tk.Tk):
         self._bind_hotkeys()
         self._refresh_stats_panel()
 
+    # ----------------------- Insurance Prompt UI -----------------------------
+
+    def _show_insurance_prompt(self, max_ins: int) -> None:
+        if self.insurance_prompt_visible:
+            return
+        self.insurance_prompt_visible = True
+        self.insurance_max_allowed = max_ins
+
+        # Build a small inline prompt to the left of the action buttons
+        self._insurance_frame = tk.Frame(self.actions, bg="#083344", highlightbackground="#14b8a6", highlightthickness=1)
+        self._insurance_frame.pack(side=tk.RIGHT, padx=(0,10))
+
+        prompt = tk.Label(
+            self._insurance_frame,
+            text=f"Insurance? Up to {min(max_ins, self.bankroll)}  (Y/N)",
+            fg="#e0f2fe", bg="#083344", font=("Arial", 11, "bold")
+        )
+        prompt.pack(side=tk.LEFT, padx=8, pady=4)
+
+        yes_btn = ttk.Button(self._insurance_frame, text="Yes (Y)", command=self._on_insurance_yes)
+        no_btn = ttk.Button(self._insurance_frame, text="No (N)", command=self._on_insurance_no)
+        yes_btn.pack(side=tk.LEFT, padx=(4,2), pady=4)
+        no_btn.pack(side=tk.LEFT, padx=(2,8), pady=4)
+
+        # While insurance is showing, disable other action buttons
+        self._enable_actions(False, False, False, False)
+        self._update_status("Dealer shows an Ace. Decide on insurance (Y/N).")
+
+    def _hide_insurance_prompt(self) -> None:
+        if self._insurance_frame is not None:
+            try:
+                self._insurance_frame.destroy()
+            except Exception:
+                pass
+            self._insurance_frame = None
+        self.insurance_prompt_visible = False
+        self.insurance_max_allowed = 0
+
+    def _on_insurance_yes(self) -> None:
+        if not self.insurance_prompt_visible:
+            return
+        max_ins = min(self.insurance_max_allowed, self.bankroll)
+        if max_ins > 0:
+            self.insurance_bet = max_ins
+            self.bankroll -= max_ins
+            self._refresh_bankroll()
+            self._update_status(f"Insurance purchased for {max_ins}.")
+        else:
+            self._update_status("No bankroll available for insurance.")
+        self._hide_insurance_prompt()
+        # Continue flow
+        self._after_insurance_decision()
+
+    def _on_insurance_no(self) -> None:
+        if not self.insurance_prompt_visible:
+            return
+        self._update_status("Insurance declined.")
+        self._hide_insurance_prompt()
+        # Continue flow
+        self._after_insurance_decision()
+
+    def _after_insurance_decision(self) -> None:
+        # Resume draw state as it was (dealer hole hidden unless dealer has blackjack after peek)
+        up = self.dealer.cards[0][0]
+        self.dealer_blackjack = self.dealer.is_blackjack() if up in ("A","10","J","Q","K") else False
+        self._draw_table(hide_dealer_hole=not self.dealer_blackjack)
+
+        if self.dealer_blackjack:
+            self._update_status("Dealer has blackjack.")
+            self._finish_round(dealer_blackjack=True)
+            return
+
+        player = self.player_hands[0].hand
+        if player.is_blackjack():
+            self._update_status("Blackjack! Paying 3:2.")
+            self._finish_round(dealer_blackjack=False)
+            return
+
+        self._update_actions_for_active_hand()
+
     # ----------------------- Rendering --------------------------------------
 
     def _draw_table(self, hide_dealer_hole: bool) -> None:
-        # Remember this state so window resizes keep the right reveal
         self._last_hide_dealer_hole = hide_dealer_hole
 
         self.canvas.delete("all")
@@ -449,7 +542,6 @@ class BlackjackApp(tk.Tk):
 
         # Dealer area
         self._draw_label(cw // 2, top_margin, "Dealer", anchor="n", size=14)
-        # Dealer hand centered
         self._draw_hand_centered(self.dealer, y=dealer_y, hide_hole=hide_dealer_hole, slot_index=0, slots=1, canvas_width=cw)
 
         if not hide_dealer_hole:
@@ -480,7 +572,7 @@ class BlackjackApp(tk.Tk):
     def _draw_label(self, x: int, y: int, text: str, anchor="center", size=12) -> None:
         self.canvas.create_text(x, y, text=text, fill=TABLE_TEXT, font=("Arial", size, "bold"), anchor=anchor)
 
-    # Centered drawing helpers (compute a start x per slot)
+    # Centered drawing helpers
     def _slot_center_x(self, slot_index: int, slots: int, canvas_width: int) -> int:
         region_w = canvas_width // max(1, slots)
         return region_w * slot_index + region_w // 2
@@ -498,7 +590,6 @@ class BlackjackApp(tk.Tk):
         self._draw_label(start_x + CARD_W * 3 + CARD_SPACING * 3, y + CARD_H + 6, status, anchor="nw", size=12)
         if is_active:
             pad = 10
-            # outline around expected max width of 6 cards
             max_w = CARD_W + CARD_SPACING * 5
             self.canvas.create_rectangle(start_x - pad, y - pad, start_x + max_w + pad, y + CARD_H + pad, outline="#ffd166", width=3)
 
@@ -808,6 +899,9 @@ class BlackjackApp(tk.Tk):
     def on_deal(self) -> None:
         if self.in_round or self.animating:
             return
+        # Clear any dangling insurance prompt just in case
+        self._hide_insurance_prompt()
+
         # If previous round finished, discard now so cards remained visible until this point
         if self.round_complete:
             _ = self._collect_discards()
@@ -878,42 +972,20 @@ class BlackjackApp(tk.Tk):
             self.canvas.update_idletasks()
             self._draw_table(hide_dealer_hole=True)
             self._offer_insurance()
-
-        # Dealer peek for blackjack if upcard could make blackjack
-        up = self.dealer.cards[0][0]
-        if up in ("A", "10", "J", "Q", "K"):
-            self.dealer_blackjack = self.dealer.is_blackjack()
-        else:
-            self.dealer_blackjack = False
-
-        self._draw_table(hide_dealer_hole=not self.dealer_blackjack)
-
-        player = self.player_hands[0].hand
-
-        if self.dealer_blackjack:
-            self._update_status("Dealer has blackjack.")
-            self._finish_round(dealer_blackjack=True)
+            # _offer_insurance will bring up inline prompt and pause here
             return
 
-        # Player natural blackjack
-        if player.is_blackjack():
-            self._update_status("Blackjack! Paying 3:2.")
-            self._finish_round(dealer_blackjack=False)
-            return
-
-        self._update_actions_for_active_hand()
+        # Otherwise continue with normal peek & flow
+        self._after_insurance_decision()
 
     def _offer_insurance(self) -> None:
         total_bets = sum(ph.bet for ph in self.player_hands)
         max_ins = total_bets // 2
         if max_ins == 0 or self.bankroll == 0:
+            # If no insurance possible, just continue
+            self._after_insurance_decision()
             return
-        if messagebox.askyesno("Insurance", f"Dealer shows an Ace. Buy insurance up to {min(max_ins, self.bankroll)}?"):
-            ins = min(max_ins, self.bankroll)
-            self.insurance_bet = ins
-            self.bankroll -= ins
-            self._refresh_bankroll()
-            self._update_status(f"Insurance purchased for {ins}.")
+        self._show_insurance_prompt(max_ins)
 
     def _update_actions_for_active_hand(self) -> None:
         ph = self.player_hands[self.active_hand_index]
@@ -926,7 +998,7 @@ class BlackjackApp(tk.Tk):
         self._update_hint()
 
     def on_hit(self) -> None:
-        if not self.in_round or self.animating:
+        if not self.in_round or self.animating or self.insurance_prompt_visible:
             return
         ph = self.player_hands[self.active_hand_index]
         self._record_action('HIT')
@@ -944,13 +1016,13 @@ class BlackjackApp(tk.Tk):
                 self._update_actions_for_active_hand()
 
     def on_stand(self) -> None:
-        if not self.in_round or self.animating:
+        if not self.in_round or self.animating or self.insurance_prompt_visible:
             return
         self._record_action('STAND')
         self._next_hand_or_dealer()
 
     def on_double(self) -> None:
-        if not self.in_round or self.animating:
+        if not self.in_round or self.animating or self.insurance_prompt_visible:
             return
         ph = self.player_hands[self.active_hand_index]
         if not ph.can_double() or self.bankroll < ph.bet:
@@ -966,7 +1038,7 @@ class BlackjackApp(tk.Tk):
         self._next_hand_or_dealer()
 
     def on_split(self) -> None:
-        if not self.in_round or self.animating:
+        if not self.in_round or self.animating or self.insurance_prompt_visible:
             return
         ph = self.player_hands[self.active_hand_index]
         if not (len(ph.hand.cards) == 2 and ph.hand.is_pair() and len(self.player_hands) < 2 and self.bankroll >= ph.bet):
