@@ -1,10 +1,19 @@
-This is a project to make a functional blackjack simulator for the sake of the glorious UConn Blackjack Team
+This is a project to make a functional blackjack simulator for the sake of the glorious UConn Blackjack Team. Some Notes:
 
-TODO
+individual.py is outdated. download and run blackjackbeta.exe on Windows. the python files are the most updated version (functionality not guaranteed), download everything into the same directory and run main.py.
+
+TODO:
+
  0 Create UI
+ 
  0 Imbue Strategy
+ 
  0 charts and shi
+ 
  o hide charts and shi functionality
+ 
  o hand filtering
+ 
  o account 
- o more players???
+ 
+ o more players (cpu)???
