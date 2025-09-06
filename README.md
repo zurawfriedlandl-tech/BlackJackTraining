@@ -4,13 +4,13 @@ individual.py is outdated. download and run blackjackbeta.exe on Windows. the py
 
 TODO:
 
- 0 Create UI
+ - Create UI
  
- 0 Imbue Strategy
+ - Imbue Strategy
  
- 0 charts and shi
+ - charts and shi
  
- o hide charts and shi functionality
+ - hide charts and shi functionality
  
  o hand filtering
  
