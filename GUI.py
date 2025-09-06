@@ -68,6 +68,7 @@ class BlackjackApp(tk.Tk):
         self.show_hint = tk.BooleanVar(value=False)
         self.advice_text = tk.StringVar(value="")
 
+        self.cc_visible: bool = True
         # Decision stats
         self.stats = {
             'total': 0, 'correct': 0,
@@ -146,6 +147,28 @@ class BlackjackApp(tk.Tk):
         else:
             self.advice_text.set("")
             self._highlight_buttons(None)
+
+    def toggle_card_count_menu(self) -> None:
+        """Show/hide the Card Counting panel. Also bound to 'c'/'C' keys."""
+        try:
+            self.cc_visible = not getattr(self, "cc_visible", True)
+            if self.cc_visible:
+                # Repack the content area
+                if hasattr(self, "cc_content"):
+                    self.cc_content.pack(fill=tk.X)
+                if hasattr(self, "cc_toggle_btn"):
+                    self.cc_toggle_btn.config(text="Hide")
+                self._update_status("Card counting panel shown.")
+            else:
+                if hasattr(self, "cc_content"):
+                    self.cc_content.pack_forget()
+                if hasattr(self, "cc_toggle_btn"):
+                    self.cc_toggle_btn.config(text="Show")
+                self._update_status("Card counting panel hidden.")
+        except Exception:
+            # Fail-safe: do nothing if widgets not yet built
+            pass
+
 
     def _update_status(self, msg: str) -> None:
         self.msg_var.set(msg)
@@ -311,7 +334,18 @@ class BlackjackApp(tk.Tk):
         self.count_info_var = tk.StringVar(value=self._format_counts())
         tk.Label(info_panel, textvariable=self.decks_info_var, fg="#c7d2fe", bg="#0a3d27", font=("Arial", 12)).pack(anchor="w", padx=8, pady=(6,2))
         tk.Label(info_panel, textvariable=self.discard_info_var, fg="#c7d2fe", bg="#0a3d27", font=("Arial", 12)).pack(anchor="w", padx=8, pady=(0,2))
-        tk.Label(info_panel, textvariable=self.count_info_var, fg="#c7d2fe", bg="#0a3d27", font=("Arial", 12, "bold")).pack(anchor="w", padx=8, pady=(0,6))
+        # Card Counting (toggleable)
+        cc_header = tk.Frame(info_panel, bg="#0a3d27")
+        cc_header.pack(fill=tk.X, padx=4, pady=(4,0))
+        tk.Label(cc_header, text="Card Counting", fg="#e2e8f0", bg="#0a3d27", font=("Arial", 12, "bold")).pack(side=tk.LEFT, padx=4)
+        self.cc_toggle_btn = ttk.Button(cc_header, text="Hide", command=self.toggle_card_count_menu)
+        self.cc_toggle_btn.pack(side=tk.RIGHT, padx=8)
+
+        self.cc_content = tk.Frame(info_panel, bg="#0a3d27")
+        self.cc_content.pack(fill=tk.X)
+
+        self.count_info_lbl = tk.Label(self.cc_content, textvariable=self.count_info_var, fg="#c7d2fe", bg="#0a3d27", font=("Arial", 12, "bold"))
+        self.count_info_lbl.pack(anchor="w", padx=8, pady=(0,6))
 
         # P/L chart
         chart_frame = tk.Frame(side, bg="#0a3d27", bd=0, highlightbackground="#134e4a", highlightthickness=1)
