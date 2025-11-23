@@ -1,0 +1,11 @@
+Beta:
+ - Blackjack Trainer w/ basic blackjack strategy and card counting functionality
+ - Packed into .exe file for easy operation on Windows (Also works on linux via Wine, tested on ubuntu 24.04)
+
+V1.0:
+ - Added new game mode! There is now a DRILL mode, to optimize your time studying basic blackjack strategy
+    - Use the exclusive hand toggling feature in Drill mode to practice only what you need to
+ - There is now a main menu, choose how you want to play!
+ - Made some bug fixes
+    - The space bar no longer interacts with menu items, dealing new hands won't effect your settings
+    - Slight UI changes
