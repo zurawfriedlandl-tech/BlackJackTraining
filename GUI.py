@@ -16,11 +16,16 @@ class BlackjackApp(tk.Tk):
         super().__init__()
         self.title("Blackjack — Fullscreen + In-GUI Insurance (v2)")
         self.configure(bg=BACKGROUND_COLOR)
+        
 
         # Window is resizable; start with a comfortable size
         self.geometry("1280x800")
         self.minsize(1024, 700)
         self.resizable(True, True)
+
+        # Main Menu vars
+        self.mode: str | None = None
+        self.in_menu: bool = False
 
         # Fullscreen state
         self._is_fullscreen = False
@@ -68,6 +73,11 @@ class BlackjackApp(tk.Tk):
         self.show_hint = tk.BooleanVar(value=False)
         self.advice_text = tk.StringVar(value="")
 
+        # Drill mode filters
+        self.drill_include_hard = tk.BooleanVar(value=True)
+        self.drill_include_soft = tk.BooleanVar(value=True)
+        self.drill_include_pairs = tk.BooleanVar(value=True)
+
         self.cc_visible: bool = True
         # Decision stats
         self.stats = {
@@ -85,7 +95,8 @@ class BlackjackApp(tk.Tk):
         self.stats_split_var = tk.StringVar(value="Split: 0/0")
 
         self._build_ui()
-        self._update_status("Welcome! Set your bet and click Deal.  Press F11 to toggle fullscreen.")
+        self._enter_main_menu()
+        #self._update_status("Welcome! Set your bet and click Deal.  Press F11 to toggle fullscreen.")
 
     # ----------------------- Fullscreen Helpers ------------------------------
 
@@ -97,6 +108,60 @@ class BlackjackApp(tk.Tk):
         if self._is_fullscreen:
             self._is_fullscreen = False
             self.attributes('-fullscreen', False)
+
+
+    # ----------------------- Side Panel Layout Modes -------------------------
+
+    def _set_trainer_side_panel_layout(self) -> None:
+        """Standard mode: show everything except drill filters."""
+        widgets = [
+            self.hud_panel,
+            self.outcome_lbl,
+            self.hint_panel,
+            self.stats_panel,
+            self.drill_panel,
+            self.info_panel,
+            self.chart_frame,
+        ]
+        # Clear existing packing
+        for w in widgets:
+            try:
+                w.pack_forget()
+            except Exception:
+                pass
+
+        # Trainer layout: HUD → outcome → hint → stats → info → chart
+        self.hud_panel.pack(fill=tk.X, pady=(0,8))
+        self.outcome_lbl.pack(fill=tk.X, pady=(0,8))
+        self.hint_panel.pack(fill=tk.X, pady=(0,8))
+        self.stats_panel.pack(fill=tk.X, pady=(0,8))
+        # drill_panel intentionally hidden in trainer mode
+        self.info_panel.pack(fill=tk.X)
+        self.chart_frame.pack(fill=tk.X, pady=(8,0))
+
+    def _set_drill_side_panel_layout(self) -> None:
+        """drill mode: only show hint + drill filters."""
+        widgets = [
+            self.hud_panel,
+            self.outcome_lbl,
+            self.hint_panel,
+            self.stats_panel,
+            self.drill_panel,
+            self.info_panel,
+            self.chart_frame,
+        ]
+        for w in widgets:
+            try:
+                w.pack_forget()
+            except Exception:
+                pass
+
+        # drill layout: only hint and drill filters
+        self.hint_panel.pack(fill=tk.X, pady=(0,8))
+        self.stats_panel.pack(fill=tk.X, pady=(0,8))
+        self.drill_panel.pack(fill=tk.X, pady=(0,8))
+
+
 
     # ----------------------- Utilities --------------------------------------
 
@@ -122,8 +187,8 @@ class BlackjackApp(tk.Tk):
         self.bind_all('<D>', lambda e: self.on_double())
         self.bind_all('<p>', lambda e: self.on_split())
         self.bind_all('<P>', lambda e: self.on_split())
-        self.bind_all('<space>', lambda e: self.on_deal())
-        self.bind_all('<Return>', lambda e: self.on_deal())
+        self.bind_all('<space>', self._on_deal_hotkey)
+        self.bind_all('<Return>', self._on_deal_hotkey)
         self.bind_all('<r>', lambda e: self.on_shuffle())
         self.bind_all('<R>', lambda e: self.on_shuffle())
 
@@ -132,6 +197,20 @@ class BlackjackApp(tk.Tk):
         self.bind_all('<Y>', lambda e: self._on_insurance_yes())
         self.bind_all('<n>', lambda e: self._on_insurance_no())
         self.bind_all('<N>', lambda e: self._on_insurance_no())
+
+        for cls in ("Button", "TButton", "Checkbutton", "TCheckbutton"):
+            try:
+                self.unbind_class(cls, "<space>")
+                self.unbind_class(cls, "<Return>")
+            except Exception:
+                pass
+
+    def _on_deal_hotkey(self, event) -> str | None:
+        if getattr(self, "in_menu", False):
+            return "break"
+       
+        self.on_deal()
+        return "break"
 
     def _delay(self) -> int:
         return max(0, int(self.deal_delay_var.get()))
@@ -207,40 +286,43 @@ class BlackjackApp(tk.Tk):
 
     def _build_ui(self) -> None:
         # Top info bar
-        top = tk.Frame(self, bg=BACKGROUND_COLOR)
-        top.pack(side=tk.TOP, fill=tk.X, padx=10, pady=8)
+        self.top_bar = tk.Frame(self, bg=BACKGROUND_COLOR)
+        self.top_bar.pack(side=tk.TOP, fill=tk.X, padx=10, pady=8)
+
+        self.menu_btn = ttk.Button(self.top_bar, text="Main Menu", command=self._enter_main_menu)
+        self.menu_btn.pack(side=tk.LEFT, padx=6)
 
         self.bank_var = tk.StringVar(value=f"Bankroll: {self.bankroll}")
         self.bet_var = tk.IntVar(value=self.min_bet)
 
-        bank_lbl = tk.Label(top, textvariable=self.bank_var, fg=TABLE_TEXT, bg=BACKGROUND_COLOR, font=("Arial", 16, "bold"))
+        bank_lbl = tk.Label(self.top_bar, textvariable=self.bank_var, fg=TABLE_TEXT, bg=BACKGROUND_COLOR, font=("Arial", 16, "bold"))
         bank_lbl.pack(side=tk.LEFT, padx=(0,12))
 
-        bet_lbl = tk.Label(top, text="Bet:", fg=TABLE_TEXT, bg=BACKGROUND_COLOR, font=("Arial", 12))
+        bet_lbl = tk.Label(self.top_bar, text="Bet:", fg=TABLE_TEXT, bg=BACKGROUND_COLOR, font=("Arial", 12))
         bet_lbl.pack(side=tk.LEFT)
-        self.bet_spin = tk.Spinbox(top, from_=self.min_bet, to=999999, increment=5, width=8, textvariable=self.bet_var, font=("Arial", 12))
+        self.bet_spin = tk.Spinbox(self.top_bar, from_=self.min_bet, to=999999, increment=5, width=8, textvariable=self.bet_var, font=("Arial", 12))
         self.bet_spin.pack(side=tk.LEFT, padx=6)
 
-        self.deal_btn = ttk.Button(top, text="Deal", command=self.on_deal)
+        self.deal_btn = ttk.Button(self.top_bar, text="Deal", command=self.on_deal)
         self.deal_btn.pack(side=tk.LEFT, padx=6)
 
-        self.new_shoe_btn = ttk.Button(top, text="Shuffle Shoe", command=self.on_shuffle)
+        self.new_shoe_btn = ttk.Button(self.top_bar, text="Shuffle Shoe", command=self.on_shuffle)
         self.new_shoe_btn.pack(side=tk.LEFT, padx=6)
 
         # Deck controls
-        decks_lbl = tk.Label(top, text="Decks:", fg=TABLE_TEXT, bg=BACKGROUND_COLOR, font=("Arial", 12))
+        decks_lbl = tk.Label(self.top_bar, text="Decks:", fg=TABLE_TEXT, bg=BACKGROUND_COLOR, font=("Arial", 12))
         decks_lbl.pack(side=tk.LEFT, padx=(20,6))
-        self.decks_spin = tk.Spinbox(top, from_=1, to=12, increment=1, width=5, textvariable=self.decks_var, font=("Arial", 12))
+        self.decks_spin = tk.Spinbox(self.top_bar, from_=1, to=12, increment=1, width=5, textvariable=self.decks_var, font=("Arial", 12))
         self.decks_spin.pack(side=tk.LEFT, padx=(0,6))
-        self.set_decks_btn = ttk.Button(top, text="Set Decks", command=self.on_set_decks)
+        self.set_decks_btn = ttk.Button(self.top_bar, text="Set Decks", command=self.on_set_decks)
         self.set_decks_btn.pack(side=tk.LEFT, padx=6)
 
         # Fullscreen toggle button
-        self.full_btn = ttk.Button(top, text="Fullscreen (F11)", command=self.toggle_fullscreen)
+        self.full_btn = ttk.Button(self.top_bar, text="Fullscreen (F11)", command=self.toggle_fullscreen)
         self.full_btn.pack(side=tk.RIGHT, padx=(6,0))
 
         # Speed slider block
-        speed_frame = tk.Frame(top, bg=BACKGROUND_COLOR)
+        speed_frame = tk.Frame(self.top_bar, bg=BACKGROUND_COLOR)
         speed_frame.pack(side=tk.RIGHT)
 
         speed_lbl = tk.Label(speed_frame, text="Deal speed:", fg=TABLE_TEXT, bg=BACKGROUND_COLOR, font=("Arial", 11))
@@ -276,88 +358,260 @@ class BlackjackApp(tk.Tk):
             b.pack(side=tk.LEFT, padx=4)
 
         # Table + side panel area
-        middle = tk.Frame(self, bg=BACKGROUND_COLOR)
-        middle.pack(fill=tk.BOTH, expand=True, padx=10, pady=(2,8))
+        self.middle_frame = tk.Frame(self, bg=BACKGROUND_COLOR)
+        self.middle_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=(2,8))
 
         # Left: main table canvas (expand with window)
-        self.canvas = tk.Canvas(middle, bg=BACKGROUND_COLOR, highlightthickness=0)
+        self.canvas = tk.Canvas(self.middle_frame, bg=BACKGROUND_COLOR, highlightthickness=0)
         self.canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0,8))
         self.canvas.bind("<Configure>", lambda e: self._draw_table(getattr(self, "_last_hide_dealer_hole", False)))
 
         # Right: info panel
-        side = tk.Frame(middle, bg=BACKGROUND_COLOR)
-        side.pack(side=tk.LEFT, fill=tk.Y)
+        self.side_panel = tk.Frame(self.middle_frame, bg=BACKGROUND_COLOR)
+        self.side_panel.pack(side=tk.LEFT, fill=tk.Y)
 
         # Player HUD
-        hud = tk.Frame(side, bg="#0a3d27", bd=0, highlightbackground="#134e4a", highlightthickness=1)
-        hud.pack(fill=tk.X, pady=(0,8))
-        tk.Label(hud, text="PLAYER", fg="#e2e8f0", bg="#0a3d27", font=("Arial", 12, "bold")).pack(anchor="w", padx=8, pady=(6,0))
+        self.hud_panel = tk.Frame(self.side_panel, bg="#0a3d27", bd=0, highlightbackground="#134e4a", highlightthickness=1)
+        self.hud_panel.pack(fill=tk.X, pady=(0,8))
+        tk.Label(self.hud_panel, text="PLAYER", fg="#e2e8f0", bg="#0a3d27", font=("Arial", 12, "bold")).pack(anchor="w", padx=8, pady=(6,0))
         self.player_value_var = tk.StringVar(value="Value: —")
         self.player_bet_var = tk.StringVar(value="Bet: —")
-        tk.Label(hud, textvariable=self.player_value_var, fg="#fef08a", bg="#0a3d27", font=("Arial", 18, "bold")).pack(anchor="w", padx=8, pady=(4,0))
-        tk.Label(hud, textvariable=self.player_bet_var, fg="#93c5fd", bg="#0a3d27", font=("Arial", 14)).pack(anchor="w", padx=8, pady=(2,6))
+        tk.Label(self.hud_panel, textvariable=self.player_value_var, fg="#fef08a", bg="#0a3d27", font=("Arial", 18, "bold")).pack(anchor="w", padx=8, pady=(4,0))
+        tk.Label(self.hud_panel, textvariable=self.player_bet_var, fg="#93c5fd", bg="#0a3d27", font=("Arial", 14)).pack(anchor="w", padx=8, pady=(2,6))
 
         # Outcome banner
         self.outcome_var = tk.StringVar(value="")
-        self.outcome_lbl = tk.Label(side, textvariable=self.outcome_var, fg="#111111", bg="#d1fae5", font=("Arial", 14, "bold"))
+        self.outcome_lbl = tk.Label(self.side_panel, textvariable=self.outcome_var, fg="#111111", bg="#d1fae5", font=("Arial", 14, "bold"))
         self.outcome_lbl.pack(fill=tk.X, pady=(0,8))
 
         # Basic Strategy Hint panel
-        hint = tk.Frame(side, bg="#0a3d27", bd=0, highlightbackground="#134e4a", highlightthickness=1)
-        hint.pack(fill=tk.X, pady=(0,8))
-        tk.Label(hint, text="Basic Strategy Hint", fg="#e2e8f0", bg="#0a3d27", font=("Arial", 12, "bold")).pack(anchor="w", padx=8, pady=(6,0))
-        cb = ttk.Checkbutton(hint, text="Show hint while playing", variable=self.show_hint, command=self._toggle_hint)
+        self.hint_panel = tk.Frame(self.side_panel, bg="#0a3d27", bd=0, highlightbackground="#134e4a", highlightthickness=1)
+        self.hint_panel.pack(fill=tk.X, pady=(0,8))
+        tk.Label(self.hint_panel, text="Basic Strategy Hint", fg="#e2e8f0", bg="#0a3d27", font=("Arial", 12, "bold")).pack(anchor="w", padx=8, pady=(6,0))
+        cb = ttk.Checkbutton(self.hint_panel, text="Show hint while playing", variable=self.show_hint, command=self._toggle_hint)
         cb.pack(anchor="w", padx=8, pady=(0,4))
-        self.advice_lbl = tk.Label(hint, textvariable=self.advice_text, fg="#c7d2fe", bg="#0a3d27", font=("Arial", 11), justify="left", wraplength=PL_CHART_W-16)
+        self.advice_lbl = tk.Label(self.hint_panel, textvariable=self.advice_text, fg="#c7d2fe", bg="#0a3d27", font=("Arial", 11), justify="left", wraplength=PL_CHART_W-16)
         self.advice_lbl.pack(fill=tk.X, padx=8, pady=(2,8))
 
         # Decision Stats panel
-        stats_panel = tk.Frame(side, bg="#0a3d27", bd=0, highlightbackground="#134e4a", highlightthickness=1)
-        stats_panel.pack(fill=tk.X, pady=(0,8))
-        tk.Label(stats_panel, text="Decision Stats", fg="#e2e8f0", bg="#0a3d27", font=("Arial", 12, "bold")).pack(anchor="w", padx=8, pady=(6,0))
-        tk.Label(stats_panel, textvariable=self.stats_total_var, fg="#c7d2fe", bg="#0a3d27", font=("Arial", 12)).pack(anchor="w", padx=12)
-        tk.Label(stats_panel, textvariable=self.stats_correct_var, fg="#bbf7d0", bg="#0a3d27", font=("Arial", 12, "bold")).pack(anchor="w", padx=12, pady=(0,4))
-        row_stats = tk.Frame(stats_panel, bg="#0a3d27")
+        self.stats_panel = tk.Frame(self.side_panel, bg="#0a3d27", bd=0, highlightbackground="#134e4a", highlightthickness=1)
+        self.stats_panel.pack(fill=tk.X, pady=(0,8))
+        tk.Label(self.stats_panel, text="Decision Stats", fg="#e2e8f0", bg="#0a3d27", font=("Arial", 12, "bold")).pack(anchor="w", padx=8, pady=(6,0))
+        tk.Label(self.stats_panel, textvariable=self.stats_total_var, fg="#c7d2fe", bg="#0a3d27", font=("Arial", 12)).pack(anchor="w", padx=12)
+        tk.Label(self.stats_panel, textvariable=self.stats_correct_var, fg="#bbf7d0", bg="#0a3d27", font=("Arial", 12, "bold")).pack(anchor="w", padx=12, pady=(0,4))
+        row_stats = tk.Frame(self.stats_panel, bg="#0a3d27")
         row_stats.pack(anchor="w", padx=12, pady=(0,8))
         tk.Label(row_stats, textvariable=self.stats_hit_var, fg="#e2e8f0", bg="#0a3d27", font=("Arial", 11)).grid(row=0, column=0, sticky="w", padx=(0,18))
         tk.Label(row_stats, textvariable=self.stats_stand_var, fg="#e2e8f0", bg="#0a3d27", font=("Arial", 11)).grid(row=0, column=1, sticky="w", padx=(0,18))
         tk.Label(row_stats, textvariable=self.stats_double_var, fg="#e2e8f0", bg="#0a3d27", font=("Arial", 11)).grid(row=1, column=0, sticky="w", padx=(0,18))
         tk.Label(row_stats, textvariable=self.stats_split_var, fg="#e2e8f0", bg="#0a3d27", font=("Arial", 11)).grid(row=1, column=1, sticky="w", padx=(0,18))
-        ttk.Button(stats_panel, text="Reset Stats", command=self._reset_stats).pack(anchor="w", padx=8, pady=(0,8))
+        ttk.Button(self.stats_panel, text="Reset Stats", command=self._reset_stats).pack(anchor="w", padx=8, pady=(0,8))
+
+        # Drill filter panel
+        self.drill_panel = tk.Frame(self.side_panel, bg="#0a3d27", bd=0,
+                              highlightbackground="#134e4a", highlightthickness=1)
+        self.drill_panel.pack(fill=tk.X, pady=(0,8))
+
+        tk.Label(
+            self.drill_panel,
+            text="Drill Filters",
+            fg="#e2e8f0", bg="#0a3d27",
+            font=("Arial", 12, "bold")
+        ).pack(anchor="w", padx=8, pady=(6,0))
+
+        ttk.Checkbutton(
+            self.drill_panel,
+            text="Hard totals",
+            variable=self.drill_include_hard
+        ).pack(anchor="w", padx=12, pady=(0,2))
+
+        ttk.Checkbutton(
+            self.drill_panel,
+            text="Soft totals",
+            variable=self.drill_include_soft
+        ).pack(anchor="w", padx=12, pady=(0,2))
+
+        ttk.Checkbutton(
+            self.drill_panel,
+            text="Pairs",
+            variable=self.drill_include_pairs
+        ).pack(anchor="w", padx=12, pady=(0,6))
 
         # Discard, decks, counts
-        info_panel = tk.Frame(side, bg="#0a3d27", bd=0, highlightbackground="#134e4a", highlightthickness=1)
-        info_panel.pack(fill=tk.X)
+        self.info_panel = tk.Frame(self.side_panel, bg="#0a3d27", bd=0, highlightbackground="#134e4a", highlightthickness=1)
+        self.info_panel.pack(fill=tk.X)
 
         self.decks_info_var = tk.StringVar(value=f"Decks in shoe: {self.shoe.decks}")
         self.discard_info_var = tk.StringVar(value=f"Discard pile: {self.discard_count} cards")
         self.count_info_var = tk.StringVar(value=self._format_counts())
-        tk.Label(info_panel, textvariable=self.decks_info_var, fg="#c7d2fe", bg="#0a3d27", font=("Arial", 12)).pack(anchor="w", padx=8, pady=(6,2))
-        tk.Label(info_panel, textvariable=self.discard_info_var, fg="#c7d2fe", bg="#0a3d27", font=("Arial", 12)).pack(anchor="w", padx=8, pady=(0,2))
+        tk.Label(self.info_panel, textvariable=self.decks_info_var, fg="#c7d2fe", bg="#0a3d27", font=("Arial", 12)).pack(anchor="w", padx=8, pady=(6,2))
+        tk.Label(self.info_panel, textvariable=self.discard_info_var, fg="#c7d2fe", bg="#0a3d27", font=("Arial", 12)).pack(anchor="w", padx=8, pady=(0,2))
         # Card Counting (toggleable)
-        cc_header = tk.Frame(info_panel, bg="#0a3d27")
+        cc_header = tk.Frame(self.info_panel, bg="#0a3d27")
         cc_header.pack(fill=tk.X, padx=4, pady=(4,0))
         tk.Label(cc_header, text="Card Counting", fg="#e2e8f0", bg="#0a3d27", font=("Arial", 12, "bold")).pack(side=tk.LEFT, padx=4)
         self.cc_toggle_btn = ttk.Button(cc_header, text="Hide", command=self.toggle_card_count_menu)
         self.cc_toggle_btn.pack(side=tk.RIGHT, padx=8)
 
-        self.cc_content = tk.Frame(info_panel, bg="#0a3d27")
+        self.cc_content = tk.Frame(self.info_panel, bg="#0a3d27")
         self.cc_content.pack(fill=tk.X)
 
         self.count_info_lbl = tk.Label(self.cc_content, textvariable=self.count_info_var, fg="#c7d2fe", bg="#0a3d27", font=("Arial", 12, "bold"))
         self.count_info_lbl.pack(anchor="w", padx=8, pady=(0,6))
 
         # P/L chart
-        chart_frame = tk.Frame(side, bg="#0a3d27", bd=0, highlightbackground="#134e4a", highlightthickness=1)
-        chart_frame.pack(fill=tk.X, pady=(8,0))
-        tk.Label(chart_frame, text="P/L Chart", fg="#e2e8f0", bg="#0a3d27", font=("Arial", 12, "bold")).pack(anchor="w", padx=8, pady=(6,0))
-        self.pl_canvas = tk.Canvas(chart_frame, width=PL_CHART_W, height=PL_CHART_H, bg="#0a3d27", highlightthickness=0)
+        self.chart_frame = tk.Frame(self.side_panel, bg="#0a3d27", bd=0, highlightbackground="#134e4a", highlightthickness=1)
+        self.chart_frame.pack(fill=tk.X, pady=(8,0))
+        tk.Label(self.chart_frame, text="P/L Chart", fg="#e2e8f0", bg="#0a3d27", font=("Arial", 12, "bold")).pack(anchor="w", padx=8, pady=(6,0))
+        self.pl_canvas = tk.Canvas(self.chart_frame, width=PL_CHART_W, height=PL_CHART_H, bg="#0a3d27", highlightthickness=0)
         self.pl_canvas.pack(padx=8, pady=8)
 
         self._disable_actions()
         self._draw_pl_chart()
         self._bind_hotkeys()
         self._refresh_stats_panel()
+
+        # ----------------------- Main Menu UI -----------------------------------
+
+    def _build_menu(self) -> None:
+        """Create the main menu frame shown at startup and when returning to menu."""
+        self.menu_frame = tk.Frame(self, bg=BACKGROUND_COLOR)
+
+        title = tk.Label(
+            self.menu_frame,
+            text="UConn Blackjack Trainer",
+            fg=TABLE_TEXT, bg=BACKGROUND_COLOR,
+            font=("Arial", 32, "bold")
+        )
+        title.pack(pady=(60, 10))
+
+        subtitle = tk.Label(
+            self.menu_frame,
+            text="Choose a mode to begin training.",
+            fg=TABLE_TEXT, bg=BACKGROUND_COLOR,
+            font=("Arial", 16)
+        )
+        subtitle.pack(pady=(0, 30))
+
+        btns = tk.Frame(self.menu_frame, bg=BACKGROUND_COLOR)
+        btns.pack()
+
+        trainer_btn = ttk.Button(
+            btns,
+            text="Standard Training (Basic Strategy)",
+            command=lambda: self._start_mode("trainer")
+        )
+        trainer_btn.grid(row=0, column=0, padx=10, pady=10, ipadx=20, ipady=10)
+
+        drills_btn = ttk.Button(
+            btns,
+            text="Drill Mode",
+            command=lambda: self._start_mode("drill")
+        )
+        drills_btn.grid(row=1, column=0, padx=10, pady=10, ipadx=20, ipady=10)
+
+        quit_btn = ttk.Button(
+            self.menu_frame,
+            text="Quit",
+            command=self.destroy
+        )
+        quit_btn.pack(pady=(40, 0))
+
+    def _enter_main_menu(self) -> None:
+        """Hide game UI and show the main menu."""
+        # Reset round state so nothing is half-running in the background
+        self.in_menu = True
+        self.in_round = False
+        self.animating = False
+        self.round_complete = False
+        self._disable_actions()
+        if hasattr(self, "deal_btn"):
+            self.deal_btn.config(state="disabled")
+
+        # Hide game frames if they exist
+        if hasattr(self, "top_bar"):
+            self.top_bar.pack_forget()
+        if hasattr(self, "actions"):
+            self.actions.pack_forget()
+        if hasattr(self, "middle_frame"):
+            self.middle_frame.pack_forget()
+
+        # Build menu frame once
+        if not hasattr(self, "menu_frame"):
+            self._build_menu()
+        self.menu_frame.pack(fill=tk.BOTH, expand=True)
+        # Clear status
+        if hasattr(self, "msg_var"):
+            self._update_status("")
+
+    def _exit_main_menu(self) -> None:
+        """Hide the main menu and show the game UI."""
+        if hasattr(self, "menu_frame"):
+            self.menu_frame.pack_forget()
+
+        self.in_menu = False
+
+        # Show game UI frames again
+        self.top_bar.pack(side=tk.TOP, fill=tk.X, padx=10, pady=8)
+        self.actions.pack(side=tk.BOTTOM, fill=tk.X, padx=10, pady=8)
+        self.middle_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=(2, 8))
+
+        # Re-enable Deal button and reset status text
+        self.deal_btn.config(state="normal")
+        self._update_status("Welcome! Set your bet and click Deal.  Press F11 to toggle fullscreen.")
+
+    def _setup_trainer_mode(self) -> None:
+        """Configure UI/controls for normal trainer mode."""
+        self.mode = "trainer"
+        # Enable shoe/bet controls
+        self.bet_spin.config(state="normal")
+        self.new_shoe_btn.config(state="normal")
+        self.decks_spin.config(state="normal")
+        self.set_decks_btn.config(state="normal")
+        self.deal_btn.config(text="Deal", state="normal")
+
+        self._set_trainer_side_panel_layout()
+
+        self._update_status("Welcome! Set your bet and click Deal.  Press F11 to toggle fullscreen.")
+        self.outcome_var.set("")
+        self.advice_text.set("")
+        self._highlight_buttons(None)
+
+    def _setup_drill_mode(self) -> None:
+        """Configure UI/controls for drill mode (no bankroll, no shoe use)."""
+        self.mode = "drill"
+
+        # Disable shoe / bet controls (not used in drill)
+        self.bet_spin.config(state="disabled")
+        self.new_shoe_btn.config(state="disabled")
+        self.decks_spin.config(state="disabled")
+        self.set_decks_btn.config(state="disabled")
+
+        self.deal_btn.config(text="Next Question", state="normal")
+
+        self._set_drill_side_panel_layout()
+
+        # Reset per-drill visuals & stats
+        self._reset_stats()
+        self.outcome_var.set("")
+        self.advice_text.set("")
+        self._highlight_buttons(None)
+
+        self._update_status(
+            "Drill Mode: choose which hand types to drill (Hard / Soft / Pairs), "
+            "then click Next Question."
+        )    
+
+    def _start_mode(self, mode: str) -> None:
+        """Set the active mode and transition from menu into the game screen."""
+        self.mode = mode
+        self._exit_main_menu()
+        if mode == "trainer":
+            self._setup_trainer_mode()
+        else:
+            self._setup_drill_mode()
+
+
 
     # ----------------------- Insurance Prompt UI -----------------------------
 
@@ -621,6 +875,10 @@ class BlackjackApp(tk.Tk):
         can_double = ph.can_double() and (self.bankroll >= ph.bet)
         can_split = (len(h.cards) == 2 and h.is_pair() and len(self.player_hands) < 2 and self.bankroll >= ph.bet)
 
+        if getattr(self, "mode", None) == "drill":
+            can_double = ph.can_double()
+            can_split = (len(h.cards) == 2 and h.is_pair())
+
         # Pair rules
         if len(h.cards) == 2 and h.is_pair():
             r = h.cards[0][0]
@@ -782,7 +1040,120 @@ class BlackjackApp(tk.Tk):
 
     # ----------------------- Game Flow ---------------------------------------
 
+    # ----------------------- Drill Mode Helpers -------------------------------
+
+    def _generate_drill_hand(self) -> None:
+        """Generate a random (player, dealer) starting situation for drill mode,
+        avoiding trivial player 21 hands."""
+        # Choose which category to draw from
+        categories = []
+        if self.drill_include_hard.get():
+            categories.append("hard")
+        if self.drill_include_soft.get():
+            categories.append("soft")
+        if self.drill_include_pairs.get():
+            categories.append("pair")
+        if not categories:
+            categories = ["hard"]  # fallback
+
+        # Dealer upcard + hole
+        up_rank = random.choice(RANKS)
+        up_suit = random.choice(SUITS)
+        hole_rank = random.choice(RANKS)
+        hole_suit = random.choice(SUITS)
+        self.dealer = Hand([(up_rank, up_suit), (hole_rank, hole_suit)])
+
+        # Re-roll player hand until it's NOT 21
+        while True:
+            category = random.choice(categories)
+
+            if category == "pair":
+                r = random.choice(RANKS)
+                s1, s2 = random.sample(SUITS, 2)
+                cards = [(r, s1), (r, s2)]
+
+            elif category == "soft":
+                # One ace + one non-ace card (soft total), but allow all except 21
+                non_ace_ranks = [r for r in RANKS if r != "A"]
+                r2 = random.choice(non_ace_ranks)
+                s1, s2 = random.sample(SUITS, 2)
+                cards = [("A", s1), (r2, s2)]
+                random.shuffle(cards)
+
+            else:  # "hard"
+                non_ace_ranks = [r for r in RANKS if r != "A"]
+                while True:
+                    r1 = random.choice(non_ace_ranks)
+                    r2 = random.choice(non_ace_ranks)
+                    total = VALUES[r1] + VALUES[r2]
+                    if 5 <= total <= 21:
+                        break
+                s1, s2 = random.sample(SUITS, 2)
+                cards = [(r1, s1), (r2, s2)]
+
+            player_hand = Hand(cards)
+
+            # Skip trivial hands that already total 21 (e.g., A+10, 10+J, etc.)
+            if player_hand.value() != 21:
+                break
+
+        self.player_hands = [PlayerHand(hand=player_hand, bet=self.min_bet)]
+        self.active_hand_index = 0
+        self.insurance_bet = 0
+        self.dealer_blackjack = False
+        self.round_complete = False
+        self.in_round = True
+
+        # Reset visuals
+        self.outcome_var.set("")
+        self._highlight_buttons(None)
+        self.advice_text.set("")
+        self._enable_actions(hit=True, stand=True, double=True, split=True)
+
+        # Show dealer upcard, hide hole (realistic)
+        self._draw_table(hide_dealer_hole=True)
+
+        category_name = {
+            "hard": "Hard total",
+            "soft": "Soft total",
+            "pair": "Pair",
+        }[category]
+        self._update_status(f"Drill: {category_name}. What's the best move?")
+
+
+    def _handle_drill_answer(self, action: str) -> None:
+        """Handle a user action in drill mode: grade it and show feedback."""
+        if not self.in_round or not self.player_hands or not self.dealer.cards:
+            return
+
+        self.in_round = False
+        self.deal_btn.config(state="normal")  # allow Next Question
+
+        # Record & grade using existing stats machinery
+        self._record_action(action)
+
+        ph = self.player_hands[self.active_hand_index]
+        dealer_up = self.dealer.cards[0][0]
+        best, why = self._best_move(ph, dealer_up)
+
+        if action == best:
+            self.outcome_var.set("✅ Correct!")
+            self.outcome_lbl.config(bg="#bbf7d0")
+            self._update_status(f"Correct: {best}. {why}")
+        else:
+            self.outcome_var.set("❌ Incorrect")
+            self.outcome_lbl.config(bg="#fecaca")
+            self._update_status(f"Best move: {best}. {why}")
+
+        # Visually highlight the best move
+        self._highlight_buttons(best)
+        # No bankroll / shoe changes in drill mode
+
+    
     def on_set_decks(self) -> None:
+        if getattr(self, "in_menu", False):
+            return
+        
         try:
             decks = int(self.decks_var.get())
         except Exception:
@@ -802,6 +1173,8 @@ class BlackjackApp(tk.Tk):
         self._highlight_buttons(None)
 
     def on_shuffle(self) -> None:
+        if getattr(self, "in_menu", False):
+            return
         self.shoe._reshuffle()
         self.running_count = 0
         self.discard_count = 0
@@ -813,6 +1186,15 @@ class BlackjackApp(tk.Tk):
         self._highlight_buttons(None)
 
     def on_deal(self) -> None:
+        if getattr(self, "in_menu", False):
+            return
+        
+        if getattr(self, "mode", None) == "drill":
+            # Prevent skipping without answering
+            self.deal_btn.config(state="disabled")
+            self._generate_drill_hand()
+            return
+
         if self.in_round or self.animating:
             return
         # Clear any dangling insurance prompt just in case
@@ -914,6 +1296,12 @@ class BlackjackApp(tk.Tk):
         self._update_hint()
 
     def on_hit(self) -> None:
+        if getattr(self, "in_menu", False):
+            return
+        if getattr(self, "mode", None) == "drill":
+            self._handle_drill_answer("HIT")
+            return
+
         if not self.in_round or self.animating or self.insurance_prompt_visible:
             return
         ph = self.player_hands[self.active_hand_index]
@@ -932,12 +1320,22 @@ class BlackjackApp(tk.Tk):
                 self._update_actions_for_active_hand()
 
     def on_stand(self) -> None:
+        if getattr(self, "in_menu", False):
+            return
+        if getattr(self, "mode", None) == "drill":
+            self._handle_drill_answer("STAND")
+            return
         if not self.in_round or self.animating or self.insurance_prompt_visible:
             return
         self._record_action('STAND')
         self._next_hand_or_dealer()
 
     def on_double(self) -> None:
+        if getattr(self, "in_menu", False):
+            return
+        if getattr(self, "mode", None) == "drill":
+            self._handle_drill_answer("DOUBLE")
+            return
         if not self.in_round or self.animating or self.insurance_prompt_visible:
             return
         ph = self.player_hands[self.active_hand_index]
@@ -954,6 +1352,11 @@ class BlackjackApp(tk.Tk):
         self._next_hand_or_dealer()
 
     def on_split(self) -> None:
+        if getattr(self, "in_menu", False):
+            return
+        if getattr(self, "mode", None) == "drill":
+            self._handle_drill_answer("SPLIT")
+            return
         if not self.in_round or self.animating or self.insurance_prompt_visible:
             return
         ph = self.player_hands[self.active_hand_index]
